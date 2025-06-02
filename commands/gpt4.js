@@ -1,53 +1,36 @@
 const axios = require('axios');
-const { sendMessage } = require('../handles/message');
-const MAX_MESSAGE_LENGTH = 2000;
-const DELAY_BETWEEN_MESSAGES = 1000; // 1 second
-
-
-function sendLongMessage(senderId, text, pageAccessToken, sendMessage) {
-  if (text.length > MAX_MESSAGE_LENGTH) {
-    const messages = splitMessageIntoChunks(text, MAX_MESSAGE_LENGTH);
-
-    sendMessage(senderId, { text: messages[0] }, pageAccessToken);
-
-    messages.slice(1).forEach((message, index) => {
-      setTimeout(() => sendMessage(senderId, { text: message }, pageAccessToken), (index + 1) * DELAY_BETWEEN_MESSAGES);
-    });
-  } else {
-    sendMessage(senderId, { text }, pageAccessToken);
-  }
-}
-
-
-function splitMessageIntoChunks(message, chunkSize) {
-  const regex = new RegExp(`.{1,${chunkSize}}`, 'g');
-  return message.match(regex);
-}
+const { sendMessage } = require('../handles/sendMessage');
 
 module.exports = {
   name: 'gpt4',
-  description: 'Ask GPT-4 for a response to a given query',
-  usage: '-gpt4 <query>',
-  author: 'coffee',
+  description: 'Interagit avec Gpt4 ',
+  usage: 'gpt4 [votre message]',
+  author: 'RONALD SORY',
+  
+
   async execute(senderId, args, pageAccessToken) {
-    if (!args || !Array.isArray(args) || args.length === 0) {
-      await sendMessage(senderId, { text: 'Please provide a query.' }, pageAccessToken);
-      return;
+    const message = args.join(' ');
+    if (!message) {
+      return sendMessage(senderId, { text: "❗ Utilisation : groq [votre message]" }, pageAccessToken);
     }
 
-    const query = args.join(' ');
-
     try {
-      const apiUrl = `https://markdevs-last-api-2epw.onrender.com/api/v2/gpt4?query=${encodeURIComponent(query)}`;
+      const apiUrl = `https://ronald-api-v1.vercel.app/api/gpt4?user_id=${senderId}&message=${encodeURIComponent(message)}`;
       const response = await axios.get(apiUrl);
-      const gptResponse = response.data.respond;
 
-      
-      sendLongMessage(senderId, gptResponse, pageAccessToken, sendMessage);
+      const reply = response.data?.response?.trim() || response.data?.content?.trim();
+
+      if (reply) {
+        for (let i = 0; i < reply.length; i += 1800) {
+          await sendMessage(senderId, { text: reply.substring(i, i + 1800) }, pageAccessToken);
+        }
+      } else {
+        sendMessage(senderId, { text: "❌ Groq n'a pas pu répondre. Réessaie." }, pageAccessToken);
+      }
 
     } catch (error) {
-      console.error('Error:', error);
-      await sendMessage(senderId, { text: 'Error: Could not get a response from GPT-4.' }, pageAccessToken);
+      console.error("❌ Erreur API GPT-4 :", error.message);
+      sendMessage(senderId, { text: "🚨 Une erreur s'est produite. Réessaie plus tard." }, pageAccessToken);
     }
   }
 };

@@ -1,130 +1,128 @@
-const axios = require("axios");
-const { sendMessage } = require('../handles/message');
+const axios = require('axios');
+const { sendMessage } = require('../handles/sendMessage');
 
-module.exports = {
-  name: "ai",
-  description: "felo X gemini",
-  role: 1,
-  author: "BOSSING",
+const getImageUrl = async (event, token) => {
+  const mid = event?.message?.reply_to?.mid || event?.message?.mid;
+  if (!mid) return null;
 
-  async execute(bot, args, authToken, event) {
-    // Check for attachments without replying
-    if (event.message.attachments && event.message.attachments.length > 0 && !args.length) {
-      sendMessage(bot, { 
-        text: JSON.stringify(event.message.attachments, null, 2) 
-      }, authToken).catch(err => {
-        console.error("Error sending attachment info:", err);
-      });
-      return;
-    }
+  try {
+    const { data } = await axios.get(`https://graph.facebook.com/v22.0/${mid}/attachments`, {
+      params: { access_token: token }
+    });
 
-    if (!event?.sender?.id) {
-      console.error('Invalid event object: Missing sender ID.');
-      sendMessage(bot, { text: 'Error: Missing sender ID.' }, authToken);
-      return;
-    }
-
-    const senderId = event.sender.id;
-    const userPrompt = args.join(" ");
-    const repliedMessage = event.message.reply_to?.message || "";
-    const finalPrompt = repliedMessage ? `${repliedMessage} ${userPrompt}`.trim() : userPrompt; 
-
-    if (!finalPrompt) {
-      return sendMessage(bot, { text: "Please enter your question or reply with an image to analyze." }, authToken);
-    }
-
-    try {
-      const imageUrl = await extractImageUrl(event, authToken);
-
-      if (imageUrl) {
-        const apiUrl = `https://kaiz-apis.gleeze.com/api/gemini-vision`;
-        const response = await handleImageRecognition(apiUrl, finalPrompt, imageUrl, senderId);
-        const result = response.response;
-
-        const visionResponse = `🌌 𝐆𝐞𝐦𝐢𝐧𝐢 𝐀𝐧𝐚𝐥𝐲𝐬𝐢𝐬\n━━━━━━━━━━━━━━━━━━\n${result}`;
-        sendLongMessage(bot, visionResponse, authToken);
-      } else {
-        // Use the new API for text queries
-        const apiUrl = `https://api.siputzx.my.id/api/ai/felo?query=${encodeURIComponent(finalPrompt)}`;
-        const response = await axios.get(apiUrl);
-        
-        if (response.data?.status && response.data?.data?.answer) {
-          // Get a random source if available
-          let sourceInfo = "";
-          if (response.data.data.source && response.data.data.source.length > 0) {
-            const randomSource = response.data.data.source[Math.floor(Math.random() * response.data.data.source.length)];
-            sourceInfo = `\n\n🔍 Source: ${randomSource.title || "No title"}\n${randomSource.link || "No link"}`;
-          }
-          
-          const gptResponse = `${response.data.data.answer}${sourceInfo}`;
-          sendLongMessage(bot, gptResponse, authToken);
-        } else {
-          throw new Error("Invalid response format from API");
-        }
-      }
-    } catch (error) {
-      console.error("Error in AI command:", error);
-      sendMessage(bot, { text: `Error: ${error.message || "Something went wrong."}` }, authToken);
-    }
+    const imageUrl = data?.data?.[0]?.image_data?.url || data?.data?.[0]?.file_url || null;
+    return imageUrl;
+  } catch (err) {
+    console.error("Image URL fetch error:", err?.response?.data || err.message);
+    return null;
   }
 };
 
-async function handleImageRecognition(apiUrl, prompt, imageUrl, senderId) {
-  try {
-    const { data } = await axios.get(apiUrl, {
-      params: {
-        q: prompt,
-        uid: senderId,
-        imageUrl: imageUrl || ""
+const conversationHistory = {};
+
+module.exports = {
+  name: 'ai',
+  description: 'Interact with Mocha AI using text queries and image analysis',
+  usage: 'ask a question, or send a reply question to an image.',
+  author: 'Coffee',
+
+  async execute(senderId, args, pageAccessToken, event) {
+    const prompt = args.join(' ').trim() || 'Hello';
+    const chatSessionId = "fc053908-a0f3-4a9c-ad4a-008105dcc360";
+
+const headers = {
+  "Content-Type": "application/json",
+  "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Mobile Safari/537.36",
+  "Sec-CH-UA-Platform": "\Android\",
+  "Sec-CH-UA": "\Chromium\;v=\136\, \Brave\;v=\136\, \Not.A/Brand\;v=\99\",
+  "Sec-CH-UA-Mobile": "?1",
+  "Accept": "*/*",
+  "Sec-GPC": "1",
+  "Accept-Language": "en-US,en;q=0.9",
+  "Origin": "https://newapplication-70381.chipp.ai",
+  "Sec-Fetch-Site": "same-origin",
+  "Sec-Fetch-Mode": "cors",
+  "Sec-Fetch-Dest": "empty",
+  "Referer": "https://newapplication-70381.chipp.ai/w/chat/",
+  "Accept-Encoding": "gzip, deflate, br, zstd",
+  "Cookie": [
+    "__Host-next-auth.csrf-token=4723c7d0081a66dd0b572f5e85f5b40c2543881365782b6dcca3ef7eabdc33d6%7C06adf96c05173095abb983f9138b5e7ee281721e3935222c8b369c71c8e6536b",
+    "__Secure-next-auth.callback-url=https%3A%2F%2Fapp.chipp.ai",
+    "userId_70381=729a0bf6-bf9f-4ded-a861-9fbb75b839f5",
+    "correlationId=f8752bd2-a7b2-47ff-bd33-d30e5480eea8"
+  ].join("; "),
+  "Priority": "u=1, i"
+};
+
+    try {
+      if (!conversationHistory[senderId]) {
+        conversationHistory[senderId] = [];
       }
-    });
-    return data;
-  } catch (error) {
-    throw new Error("Failed to connect to the Gemini Vision API.");
-  }
-}
 
-async function extractImageUrl(event, authToken) {
-  try {
-    if (event.message.reply_to?.mid) {
-      return await getRepliedImage(event.message.reply_to.mid, authToken);
-    } else if (event.message?.attachments?.[0]?.type === 'image') {
-      return event.message.attachments[0].payload.url;
-    }
-  } catch (error) {
-    console.error("Failed to extract image URL:", error);
-  }
-  return "";
-}
+      conversationHistory[senderId].push({ role: 'user', content: prompt });
 
-async function getRepliedImage(mid, authToken) {
-  try {
-    const { data } = await axios.get(`https://graph.facebook.com/v21.0/${mid}/attachments`, {
-      params: { access_token: authToken }
-    });
-    return data?.data[0]?.image_data?.url || "";
-  } catch (error) {
-    throw new Error("Failed to retrieve replied image.");
-  }
-}
+      const chunkMessage = (message, maxLength) => {
+        const chunks = [];
+        for (let i = 0; i < message.length; i += maxLength) {
+          chunks.push(message.slice(i, i + maxLength));
+        }
+        return chunks;
+      };
 
-function sendLongMessage(bot, text, authToken) {
-  const maxMessageLength = 2000;
-  const delayBetweenMessages = 1000;
+      const imageUrl = await getImageUrl(event, pageAccessToken);
 
-  if (text.length > maxMessageLength) {
-    const messages = splitMessageIntoChunks(text, maxMessageLength);
-    sendMessage(bot, { text: messages[0] }, authToken);
+      let payload;
 
-    messages.slice(1).forEach((message, index) => {
-      setTimeout(() => sendMessage(bot, { text: message }, authToken), (index + 1) * delayBetweenMessages);
-    });
-  } else {
-    sendMessage(bot, { text }, authToken);
-  }
-}
+      if (imageUrl) {
+        const combinedPrompt = `${prompt}\Image URL: ${imageUrl}`;
+        payload = {
+          messages: [...conversationHistory[senderId], { role: 'user', content: combinedPrompt }],
+          chatSessionId,
+          toolInvocations: [
+            {
+              toolName: 'analyzeImage',
+              args: {
+                userQuery: prompt,
+                imageUrls: [imageUrl],
+              }
+            }
+          ]
+        };
+      } else {
+        payload = {
+          messages: [...conversationHistory[senderId]],
+          chatSessionId,
+        };
+      }
 
-function splitMessageIntoChunks(message, chunkSize) {
-  const regex = new RegExp(`.{1,${chunkSize}}`, 'g');
-  return message.match(regex);
-}
+const { data } = await axios.post("https://newapplication-70381.chipp.ai/api/chat", payload, { headers });
+
+      // Gather the main text from the response chunks
+      const responseTextChunks = data.match(/"result":"(.*?)"/g)?.map(chunk => chunk.slice(10, -1).replace(/\n/g, '\')) 
+        || data.match(/0:"(.*?)"/g)?.map(chunk => chunk.slice(3, -1).replace(/\n/g, '\')) || [];
+
+      const fullResponseText = responseTextChunks.join('');
+      const toolCalls = data.choices?.[0]?.message?.toolInvocations || [];
+
+      // Process tool invocations
+      for (const toolCall of toolCalls) {
+        if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
+          // Extract description and URL cleanly
+          const descMatch = toolCall.result.match(/(?:Image|Generated Image):\*(.+?)(?:https?:\\)/i);
+          const description = descMatch ? descMatch[1].trim() : 'Generated image';
+          const urlMatch = toolCall.result.match(/https?:\\\+/);
+          const url = urlMatch ? urlMatch[0] : '';
+
+          // Compose exactly as requested, no extra newlines
+          const formattedImageReply = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒 ・───────────・ Generated Image: ${description}\\${url} ・──── >ᴗ< ────・`;
+          await sendMessage(senderId, { text: formattedImageReply }, pageAccessToken);
+          return;
+        }
+
+        if (toolCall.toolName === 'analyzeImage' && toolCall.state === 'result' && toolCall.result) {
+          await sendMessage(senderId, { text: `Image analysis result: ${toolCall.result}` }, pageAccessToken);
+          return;
+        }
+
+        if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result' && toolCall.result) {
+          // The browseWeb result can be structured, but here we just
